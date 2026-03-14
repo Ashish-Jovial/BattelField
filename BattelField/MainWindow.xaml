@@ -1,0 +1,107 @@
+﻿<Window x:Class="BattelField.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Battleship: SOLID Commander" Height="650" Width="550" 
+        Background="#1B1E23" WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <Style x:Key="GridButtonStyle" TargetType="Button">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" 
+                                BorderBrush="#2C3E50" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Opacity" Value="0.8"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="1.0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="BATTLESHIP COMMAND" Foreground="#ECF0F1" 
+                       FontSize="28" FontWeight="ExtraBold" HorizontalAlignment="Center"/>
+
+            <UniformGrid Columns="2" Margin="0,10,0,0" HorizontalAlignment="Center" Width="300">
+                <StackPanel HorizontalAlignment="Center">
+                    <TextBlock Text="SHOTS" Foreground="#BDC3C7" FontSize="12" HorizontalAlignment="Center"/>
+                    <TextBlock Text="{Binding ShotCount}" Foreground="#F1C40F" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel HorizontalAlignment="Center">
+                    <TextBlock Text="BEST SCORE" Foreground="#BDC3C7" FontSize="12" HorizontalAlignment="Center"/>
+                    <TextBlock Text="{Binding BestScore}" Foreground="#2ECC71" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </UniformGrid>
+        </StackPanel>
+
+        <Viewbox Grid.Row="1">
+            <ItemsControl ItemsSource="{Binding Grid}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <UniformGrid Rows="10" Columns="10"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Width="40" Height="40" Margin="1"
+                                Style="{StaticResource GridButtonStyle}"
+                                Background="{Binding StatusColor}"
+                                Command="{Binding DataContext.FireCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                CommandParameter="{Binding}"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Viewbox>
+
+        <StackPanel Grid.Row="2" Margin="0,20,0,0">
+            <Border Background="#2C3E50" CornerRadius="5" Padding="10">
+                <TextBlock Text="{Binding StatusText}" Foreground="White" 
+                           FontSize="14" HorizontalAlignment="Center" TextWrapping="Wrap"/>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,15,0,0">
+                <Rectangle Width="12" Height="12" Fill="#34495E" Margin="5,0"/>
+                <TextBlock Text="Unknown" Foreground="#7F8C8D" FontSize="10"/>
+                <Rectangle Width="12" Height="12" Fill="#3498DB" Margin="15,0,5,0"/>
+                <TextBlock Text="Miss" Foreground="#7F8C8D" FontSize="10"/>
+                <Rectangle Width="12" Height="12" Fill="#E74C3C" Margin="15,0,5,0"/>
+                <TextBlock Text="Hit" Foreground="#7F8C8D" FontSize="10"/>
+            </StackPanel>
+        </StackPanel>
+
+        <Border Grid.RowSpan="3" Background="#EE1B1E23" CornerRadius="10"
+                Visibility="{Binding IsGameOver, Converter={StaticResource BoolToVis}}"
+                Panel.ZIndex="100">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="VICTORY" Foreground="#2ECC71" FontSize="60" FontWeight="Black" HorizontalAlignment="Center"/>
+                <TextBlock Text="Enemy Fleet Neutralized" Foreground="White" FontSize="18" HorizontalAlignment="Center"/>
+                <TextBlock Text="{Binding ShotCount, StringFormat='Completed in {0} shots'}" 
+                           Foreground="#BDC3C7" Margin="0,10" HorizontalAlignment="Center"/>
+                <Button Content="PLAY AGAIN" Margin="0,20" Width="150" Height="40" 
+                        Background="#2ECC71" Foreground="White" FontWeight="Bold"
+                        Click="Restart_Click"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
