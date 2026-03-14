@@ -4,6 +4,7 @@ using BattelField.Services;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Linq;
 using System.Windows.Threading;
 
@@ -23,7 +24,7 @@ namespace BattelField.ViewModel
     {
         private readonly IBoardRepository _repository;
         private readonly IGameService _gameService;
-        private readonly IHighScoreService _scoreService;
+        private readonly IHighScoreService _score_service;
 
         private GameStage _stage;
         private Player _player1;
@@ -41,7 +42,10 @@ namespace BattelField.ViewModel
         private const int MaxShips = 5;
         private int _shipsToDeploy = 1;
         private string _shipNameInput;
-        private readonly Dictionary<Player, List<Ship>> _playerShips = new();
+
+        // per-player ship collections (observable for UI)
+        private readonly ObservableCollection<Ship> _player1Ships = new();
+        private readonly ObservableCollection<Ship> _player2Ships = new();
 
         // Timer
         private readonly DispatcherTimer _timer;
@@ -53,10 +57,10 @@ namespace BattelField.ViewModel
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _gameService = gameService ?? throw new ArgumentNullException(nameof(gameService));
-            _scoreService = scoreService ?? throw new ArgumentNullException(nameof(scoreService));
+            _score_service = scoreService ?? throw new ArgumentNullException(nameof(scoreService));
 
             ShotCount = 0;
-            BestScore = _scoreService.GetBestScore();
+            BestScore = _score_service.GetBestScore();
 
             Stage = GameStage.ChooseMode;
             Grid = new ObservableCollection<Cell>(_repository.GenerateBoard());
@@ -68,10 +72,25 @@ namespace BattelField.ViewModel
             StartSinglePlayerCommand = new RelayCommand(_ => StartSinglePlayer());
             CreateShipCommand = new RelayCommand(_ => CreateShip(), _ => CanCreateShip());
 
+            // hook collection changed so UI can react
+            _player1Ships.CollectionChanged += PlayerShips_CollectionChanged;
+            _player2Ships.CollectionChanged += PlayerShips_CollectionChanged;
+
             // Timer
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _timer.Tick += Timer_Tick;
         }
+
+        private void PlayerShips_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            OnPropertyChanged(nameof(IsPlayer1PlacementComplete));
+            OnPropertyChanged(nameof(IsPlayer2PlacementComplete));
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+
+        // Expose collections for UI binding (read-only)
+        public ObservableCollection<Ship> Player1Ships => _player1Ships;
+        public ObservableCollection<Ship> Player2Ships => _player2Ships;
 
         // New command to create a named ship from currently selected cells
         public RelayCommand CreateShipCommand { get; }
@@ -83,7 +102,30 @@ namespace BattelField.ViewModel
         public GameStage Stage
         {
             get => _stage;
-            set { _stage = value; OnPropertyChanged(); }
+            set
+            {
+                _stage = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsInSetup));
+                RefreshGridForCurrentStage();
+            }
+        }
+
+        public bool IsInSetup => Stage == GameStage.Player1Setup || Stage == GameStage.Player2Setup;
+
+        // Name inputs (bind TextBoxes to these)
+        private string _p1Name;
+        public string P1Name
+        {
+            get => _p1Name;
+            set { _p1Name = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanStartTwoPlayer)); System.Windows.Input.CommandManager.InvalidateRequerySuggested(); }
+        }
+
+        private string _p2Name;
+        public string P2Name
+        {
+            get => _p2Name;
+            set { _p2Name = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanStartTwoPlayer)); System.Windows.Input.CommandManager.InvalidateRequerySuggested(); }
         }
 
         public Player Player1
@@ -172,6 +214,10 @@ namespace BattelField.ViewModel
             {
                 _shipsToDeploy = Math.Max(1, Math.Min(value, MaxShips));
                 OnPropertyChanged();
+                // updating allowed ship count may affect placement completion
+                OnPropertyChanged(nameof(IsPlayer1PlacementComplete));
+                OnPropertyChanged(nameof(IsPlayer2PlacementComplete));
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
             }
         }
 
@@ -181,6 +227,13 @@ namespace BattelField.ViewModel
             get => _shipNameInput;
             set { _shipNameInput = value; OnPropertyChanged(); System.Windows.Input.CommandManager.InvalidateRequerySuggested(); }
         }
+
+        // Flags for UI: whether each player completed placement
+        public bool IsPlayer1PlacementComplete => _player1Ships.Count == ShipsToDeploy;
+        public bool IsPlayer2PlacementComplete => _player2Ships.Count == ShipsToDeploy;
+
+        // Whether the Start Two Player button should be enabled (require names)
+        public bool CanStartTwoPlayer => !string.IsNullOrWhiteSpace(P1Name) && !string.IsNullOrWhiteSpace(P2Name);
 
         private void Timer_Tick(object sender, EventArgs e)
         {
@@ -210,32 +263,74 @@ namespace BattelField.ViewModel
             return false;
         }
 
+        // Modified ExecuteGridClick selection logic to enforce contiguous same-row selection
         private void ExecuteGridClick(object parameter)
         {
             if (!(parameter is Cell clicked)) return;
 
             if (Stage == GameStage.Player1Setup || Stage == GameStage.Player2Setup)
             {
-                // Toggle HasShip for selection while creating a ship; do not finalize grouping until user clicks CreateShip.
+                if (CurrentSetter == null) return;
+
+                // Find the board cell reference
                 var own = CurrentSetter.Board.First(c => c.Row == clicked.Row && c.Column == clicked.Column);
 
                 // Toggle selection
-                own.HasShip = !own.HasShip;
+                bool newValue = !own.HasShip;
+
+                // If selecting, ensure contiguous selection in same row and within 10 columns
+                if (newValue)
+                {
+                    var board = CurrentSetter.Board;
+                    // currently selected unassigned cells (before adding this click)
+                    var selected = board.Where(c => c.HasShip && string.IsNullOrEmpty(c.ShipName)).ToList();
+                    // include the new cell
+                    selected.Add(own);
+
+                    // enforce all in same row
+                    var sameRow = selected.All(c => c.Row == selected.First().Row);
+                    // enforce contiguous columns
+                    var minCol = selected.Min(c => c.Column);
+                    var maxCol = selected.Max(c => c.Column);
+                    var contiguous = (maxCol - minCol + 1) == selected.Count;
+                    // enforce not beyond 10 columns (columns indexed 0..9 or 1..10 depending on repo)
+                    var withinBounds = selected.All(c => c.Column >= 0 && c.Column <= 9);
+
+                    if (!sameRow)
+                    {
+                        StatusText = $"{CurrentSetter.Name}: selected cells must be on the same row.";
+                        return;
+                    }
+                    if (!contiguous)
+                    {
+                        StatusText = $"{CurrentSetter.Name}: selected cells must form a contiguous block.";
+                        return;
+                    }
+                    if (!withinBounds)
+                    {
+                        StatusText = $"{CurrentSetter.Name}: selection out of column bounds (max 10).";
+                        return;
+                    }
+                }
+
+                own.HasShip = newValue;
 
                 // If removing selection that already belonged to a named ship, remove association
                 if (!own.HasShip && !string.IsNullOrEmpty(own.ShipName))
                 {
-                    var existing = _playerShips[CurrentSetter].FirstOrDefault(s => s.Name == own.ShipName);
+                    var ships = CurrentSetter == Player1 ? _player1Ships : _player2Ships;
+                    var existing = ships.FirstOrDefault(s => s.Name == own.ShipName);
                     if (existing != null)
                     {
                         existing.Cells.Remove(own);
-                        if (existing.Cells.Count == 0) _playerShips[CurrentSetter].Remove(existing);
+                        if (existing.Cells.Count == 0) ships.Remove(existing);
                     }
                     own.ShipName = null;
                 }
 
                 StatusText = $"{CurrentSetter.Name}: selected cells = {CountShips(CurrentSetter.Board)}";
                 RefreshGridForCurrentStage();
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
             }
             else if (Stage == GameStage.Play)
             {
@@ -280,8 +375,8 @@ namespace BattelField.ViewModel
         {
             try
             {
-                _scoreService.SaveScore(ShotCount);
-                BestScore = _scoreService.GetBestScore();
+                _score_service.SaveScore(ShotCount);
+                BestScore = _score_service.GetBestScore();
             }
             catch { /* ignore persistence errors */ }
         }
@@ -307,8 +402,8 @@ namespace BattelField.ViewModel
             };
 
             // initialize player ship collections so single-player placement could be extended later
-            _playerShips[Player1] = new List<Ship>();
-            _playerShips[Player2] = new List<Ship>();
+            _player1Ships.Clear();
+            _player2Ships.Clear();
 
             Stage = GameStage.Play;
             CurrentShooter = Player1;
@@ -337,8 +432,8 @@ namespace BattelField.ViewModel
             };
 
             // initialize player ship listings
-            _playerShips[Player1] = new List<Ship>();
-            _playerShips[Player2] = new List<Ship>();
+            _player1Ships.Clear();
+            _player2Ships.Clear();
 
             Stage = GameStage.Player1Setup;
             CurrentSetter = Player1;
@@ -373,8 +468,9 @@ namespace BattelField.ViewModel
             if (Stage == GameStage.Player1Setup || Stage == GameStage.Player2Setup)
             {
                 if (CurrentSetter == null) return false;
+                var ships = CurrentSetter == Player1 ? _player1Ships : _player2Ships;
                 // require that the player created exactly the selected number of ships
-                return _playerShips.TryGetValue(CurrentSetter, out var ships) && ships.Count == ShipsToDeploy;
+                return ships.Count == ShipsToDeploy;
             }
             return false;
         }
@@ -386,8 +482,11 @@ namespace BattelField.ViewModel
             if (Stage == GameStage.Player1Setup || Stage == GameStage.Player2Setup)
             {
                 // placement mode: reveal ships on the setter's board
-                foreach (var c in CurrentSetter.Board) c.IsPlacementMode = true;
-                Grid = new ObservableCollection<Cell>(CurrentSetter.Board);
+                if (CurrentSetter != null)
+                {
+                    foreach (var c in CurrentSetter.Board) c.IsPlacementMode = true;
+                    Grid = new ObservableCollection<Cell>(CurrentSetter.Board);
+                }
             }
             else if (Stage == GameStage.Play && CurrentShooter != null)
             {
@@ -423,34 +522,78 @@ namespace BattelField.ViewModel
         private void CreateShip()
         {
             if (CurrentSetter == null) return;
-            if (!_playerShips.ContainsKey(CurrentSetter)) _playerShips[CurrentSetter] = new List<Ship>();
+
+            var ships = CurrentSetter == Player1 ? _player1Ships : _player2Ships;
 
             var board = CurrentSetter.Board;
             // pick selected cells that are not already part of a named ship
             var selected = board.Where(c => c.HasShip && string.IsNullOrEmpty(c.ShipName)).ToList();
             if (selected.Count == 0) return;
-            if (_playerShips[CurrentSetter].Count >= ShipsToDeploy) return;
+            if (ships.Count >= ShipsToDeploy) return;
 
-            var shipName = string.IsNullOrWhiteSpace(ShipNameInput) ? $"Ship {_playerShips[CurrentSetter].Count + 1}" : ShipNameInput.Trim();
+            // validate orientation (horizontal or vertical)
+            bool allSameRow = selected.All(c => c.Row == selected.First().Row);
+            bool allSameCol = selected.All(c => c.Column == selected.First().Column);
+            if (!allSameRow && !allSameCol)
+            {
+                StatusText = $"{CurrentSetter.Name}: ship must be horizontal or vertical.";
+                return;
+            }
+
+            // validate contiguous and length
+            int count = selected.Count;
+            if (count > 6)
+            {
+                StatusText = $"{CurrentSetter.Name}: ship cannot exceed 6 cells.";
+                return;
+            }
+
+            bool contiguous;
+            if (allSameRow)
+            {
+                var minCol = selected.Min(c => c.Column);
+                var maxCol = selected.Max(c => c.Column);
+                contiguous = (maxCol - minCol + 1) == count;
+            }
+            else
+            {
+                var minRow = selected.Min(c => c.Row);
+                var maxRow = selected.Max(c => c.Row);
+                contiguous = (maxRow - minRow + 1) == count;
+            }
+
+            if (!contiguous)
+            {
+                StatusText = $"{CurrentSetter.Name}: selected cells must form a contiguous block.";
+                return;
+            }
+
+            // create ship
+            var shipName = string.IsNullOrWhiteSpace(ShipNameInput) ? $"Ship {ships.Count + 1}" : ShipNameInput.Trim();
             var ship = new Ship { Name = shipName };
             foreach (var c in selected)
             {
                 c.ShipName = shipName;
                 ship.Cells.Add(c);
             }
-            _playerShips[CurrentSetter].Add(ship);
+            ships.Add(ship);
 
             // clear input
             ShipNameInput = string.Empty;
-            StatusText = $"{CurrentSetter.Name}: created \"{shipName}\" ({ship.Cells.Count} cells). { _playerShips[CurrentSetter].Count}/{ShipsToDeploy} ships done.";
+            StatusText = $"{CurrentSetter.Name}: created \"{shipName}\" ({ship.Cells.Count} cells). { ships.Count}/{ShipsToDeploy} ships done.";
             RefreshGridForCurrentStage();
+
+            // notify commands & bindings
+            OnPropertyChanged(nameof(IsPlayer1PlacementComplete));
+            OnPropertyChanged(nameof(IsPlayer2PlacementComplete));
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
         }
 
         private bool CanCreateShip()
         {
             if (CurrentSetter == null) return false;
-            if (!_playerShips.ContainsKey(CurrentSetter)) _playerShips[CurrentSetter] = new List<Ship>();
-            if (_playerShips[CurrentSetter].Count >= ShipsToDeploy) return false;
+            var ships = CurrentSetter == Player1 ? _player1Ships : _player2Ships;
+            if (ships.Count >= ShipsToDeploy) return false;
             if (string.IsNullOrWhiteSpace(ShipNameInput)) return false;
             // must have at least one selected, unassigned cell
             var hasSelected = CurrentSetter.Board.Any(c => c.HasShip && string.IsNullOrEmpty(c.ShipName));

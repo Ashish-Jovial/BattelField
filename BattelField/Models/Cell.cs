@@ -26,7 +26,7 @@ namespace BattelField.Models
             set { _hasShip = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusColor)); }
         }
 
-        // New: Allows grouping cells into a named ship during placement
+        // new: ship grouping name (empty when unassigned)
         private string _shipName;
         public string ShipName
         {
@@ -34,7 +34,7 @@ namespace BattelField.Models
             set { _shipName = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusColor)); }
         }
 
-        // New: Flag to indicate the grid is shown in placement mode (so ships are revealed)
+        // new: reveal mode used during placement so placed cells show yellow
         private bool _isPlacementMode;
         public bool IsPlacementMode
         {
@@ -44,7 +44,7 @@ namespace BattelField.Models
 
         // Logic for UI color:
         // - During placement show placed ship cells as yellow.
-        // - Otherwise earlier logic: Gray = Unknown, Red = Hit, Blue = Miss
+        // - Otherwise: Gray = Unknown, Red = Hit, Blue = Miss
         public string StatusColor
         {
             get

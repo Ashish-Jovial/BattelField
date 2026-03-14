@@ -3,17 +3,19 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d"
-        Title="Battleship: SOLID Commander" Height="720" Width="600" 
+        xmlns:conv="clr-namespace:BattelField.Converters"
+        mc:Ignorable="d" WindowState="Maximized"
+        Title="Battleship: SOLID Commander" Height="760" Width="1100"
         Background="#1B1E23" WindowStartupLocation="CenterScreen">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <conv:CellToBrushConverter x:Key="CellToBrushConverter" />
         <Style x:Key="GridButtonStyle" TargetType="Button">
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="border" Background="{TemplateBinding Background}" 
+                        <Border x:Name="border" Background="{TemplateBinding Background}"
                                 BorderBrush="#2C3E50" BorderThickness="1">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
@@ -39,26 +41,13 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
+        <!-- Header shortened for brevity (keep existing header UI) -->
         <StackPanel Grid.Row="0" Margin="0,0,0,10">
-            <TextBlock Text="BATTLESHIP COMMAND" Foreground="#ECF0F1" 
+            <TextBlock Text="BATTLESHIP COMMAND" Foreground="#ECF0F1"
                        FontSize="26" FontWeight="ExtraBold" HorizontalAlignment="Center"/>
-
-            <UniformGrid Columns="3" Margin="0,8,0,0" HorizontalAlignment="Center" Width="520">
-                <StackPanel HorizontalAlignment="Center">
-                    <TextBlock Text="SHOTS" Foreground="#BDC3C7" FontSize="12" HorizontalAlignment="Center"/>
-                    <TextBlock Text="{Binding ShotCount}" Foreground="#F1C40F" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel HorizontalAlignment="Center">
-                    <TextBlock Text="BEST SCORE" Foreground="#BDC3C7" FontSize="12" HorizontalAlignment="Center"/>
-                    <TextBlock Text="{Binding BestScore}" Foreground="#2ECC71" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel HorizontalAlignment="Center">
-                    <TextBlock Text="TIMER" Foreground="#BDC3C7" FontSize="12" HorizontalAlignment="Center"/>
-                    <TextBlock Text="{Binding TimeLeft}" Foreground="#E67E22" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center"/>
-                </StackPanel>
-            </UniformGrid>
         </StackPanel>
 
+        <!-- Controls (kept mostly same) -->
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,4,0,10">
             <Button Content="One Player" Width="110" Command="{Binding StartSinglePlayerCommand}" />
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -67,50 +56,84 @@
             </StackPanel>
         </StackPanel>
 
-        <!-- Name entry and start two player -->
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,46,0,0">
-            <TextBox x:Name="P1NameBox" Width="160" Margin="2" ToolTip="Player 1 name" />
-            <TextBox x:Name="P2NameBox" Width="160" Margin="2" ToolTip="Player 2 name" />
-            <Button Content="Start Two Player" Width="140" Margin="2" Click="StartTwo_Click"/>
+            <TextBox x:Name="P1NameBox" Width="160" Margin="2" ToolTip="Player 1 name" Text="{Binding P1Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBox x:Name="P2NameBox" Width="160" Margin="2" ToolTip="Player 2 name" Text="{Binding P2Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0">
+                <TextBlock Text="Ships to deploy (max 5):" Foreground="White" VerticalAlignment="Center" Margin="4,0"/>
+                <TextBox Width="40" Text="{Binding ShipsToDeploy, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+            <TextBox Width="140" Margin="2" Text="{Binding ShipNameInput, Mode=TwoWay}" ToolTip="Name for next ship" />
+            <Button Content="Create Ship" Width="100" Margin="2" Command="{Binding CreateShipCommand}" />
+            <Button Content="Start Two Player" Width="140" Margin="2" Click="StartTwo_Click" IsEnabled="{Binding CanStartTwoPlayer}" />
         </StackPanel>
 
-        <Viewbox Grid.Row="2">
-            <ItemsControl ItemsSource="{Binding Grid}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <UniformGrid Rows="10" Columns="10"/>
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Button Width="38" Height="38" Margin="1"
-                                Style="{StaticResource GridButtonStyle}"
-                                Background="{Binding StatusColor}"
-                                Command="{Binding DataContext.FireCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                CommandParameter="{Binding}"/>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </Viewbox>
+        <!-- Two side-by-side boards -->
+        <Grid Grid.Row="2" Margin="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="32" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
+            <!-- Player 1 board (left) -->
+            <GroupBox Header="{Binding Player1.Name}" Foreground="White" Grid.Column="0" Padding="6" FontWeight="Bold">
+                <Viewbox Stretch="Uniform">
+                    <ItemsControl ItemsSource="{Binding Player1.Board}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="10" Columns="10"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Width="38" Height="38" Margin="1"
+                                        Style="{StaticResource GridButtonStyle}"
+                                        Background="{Binding ., Converter={StaticResource CellToBrushConverter}}"
+                                        Command="{Binding DataContext.FireCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Viewbox>
+            </GroupBox>
+
+            <!-- spacer -->
+            <StackPanel Grid.Column="1"/>
+
+            <!-- Player 2 board (right) -->
+            <GroupBox Header="{Binding Player2.Name}" Foreground="White" Grid.Column="2" Padding="6" FontWeight="Bold">
+                <Viewbox Stretch="Uniform">
+                    <ItemsControl ItemsSource="{Binding Player2.Board}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="10" Columns="10"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Width="38" Height="38" Margin="1"
+                                        Style="{StaticResource GridButtonStyle}"
+                                        Background="{Binding ., Converter={StaticResource CellToBrushConverter}}"
+                                        Command="{Binding DataContext.FireCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Viewbox>
+            </GroupBox>
+        </Grid>
+
+        <!-- Footer (status and controls) kept similar -->
         <StackPanel Grid.Row="3" Margin="0,12,0,0" HorizontalAlignment="Center">
-            <Border Background="#2C3E50" CornerRadius="5" Padding="10" Width="520">
-                <TextBlock Text="{Binding StatusText}" Foreground="White" 
+            <Border Background="#2C3E50" CornerRadius="5" Padding="10" Width="1000">
+                <TextBlock Text="{Binding StatusText}" Foreground="White"
                            FontSize="14" HorizontalAlignment="Center" TextWrapping="Wrap"/>
             </Border>
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0">
                 <Button Content="Set (Done Placement)" Width="160" Height="36" Command="{Binding ConfirmSetupCommand}" />
                 <Button Content="Restart" Width="110" Height="36" Click="Restart_Click"/>
-            </StackPanel>
-
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0">
-                <Rectangle Width="12" Height="12" Fill="#34495E" Margin="5,0"/>
-                <TextBlock Text="Unknown" Foreground="#7F8C8D" FontSize="10" Margin="4,0"/>
-                <Rectangle Width="12" Height="12" Fill="#3498DB" Margin="15,0,5,0"/>
-                <TextBlock Text="Miss" Foreground="#7F8C8D" FontSize="10"/>
-                <Rectangle Width="12" Height="12" Fill="#E74C3C" Margin="15,0,5,0"/>
-                <TextBlock Text="Hit" Foreground="#7F8C8D" FontSize="10"/>
             </StackPanel>
         </StackPanel>
     </Grid>
